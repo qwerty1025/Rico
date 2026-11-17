@@ -3,160 +3,265 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>發票區塊標記 OCR 解析工具 (Wasm 引擎版)</title>
+    <title>發票解析工作台 - 專業流水帳版</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 載入底層為 WebAssembly 的 Tesseract.js v5 -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { background-color: #f3f4f6; overscroll-behavior-y: contain; }
-        /* 避免手機畫框時畫面捲動 */
-        #canvas-container { position: relative; overflow: hidden; border: 1px solid #e5e7eb; cursor: crosshair; touch-action: none; background-color: #f9fafb; display: flex; justify-content: center; }
-        canvas { display: block; max-width: 100%; height: auto; }
-        .mode-btn.active { transform: scale(0.95); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); border-width: 2px; border-color: #1f2937 !important; }
+        body { background-color: #e5e7eb; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 14px; }
+        /* 高密度排版風格 */
+        .toolbar-btn { padding: 4px 8px; font-size: 12px; font-weight: bold; border-radius: 4px; border: 1px solid transparent; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; }
+        .toolbar-btn.active { border-color: #1f2937; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); transform: scale(0.95); }
+        .tab-btn { padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; border-right: 1px solid #d1d5db; background-color: #f3f4f6; color: #4b5563; display: flex; align-items: center; }
+        .tab-btn.active { background-color: #ffffff; color: #4f46e5; border-bottom: 2px solid #4f46e5; }
+        .tab-btn:hover:not(.active) { background-color: #e5e7eb; }
+        
+        #canvas-wrapper { position: relative; overflow: auto; flex-grow: 1; background-color: #9ca3af; display: flex; justify-content: center; align-items: flex-start; cursor: crosshair; touch-action: none; padding: 10px; }
+        canvas { display: block; max-width: 100%; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); background-color: white; }
+        
+        /* 自訂滾動條 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background-color: #9ca3af; border-radius: 3px; }
+        textarea { resize: none; outline: none; }
     </style>
 </head>
-<body class="p-4 md:p-8 font-sans text-gray-800">
+<body class="font-sans text-gray-800">
 
-    <div class="max-w-7xl mx-auto space-y-6">
-        <div class="text-center space-y-2">
-            <h1 class="text-2xl font-bold text-gray-900"><i class="fa-solid fa-microchip text-indigo-600 mr-2"></i>發票標記解析工具 (WebAssembly 版)</h1>
-            <p class="text-gray-500 text-sm">支援手機觸控！選擇資料類型 ➜ 在圖片上畫框 ➜ 點擊「開始辨識」。</p>
+    <!-- 頂部導航與狀態 -->
+    <div class="bg-gray-900 text-white px-4 py-2 flex justify-between items-center shadow-md z-10 shrink-0">
+        <div class="flex items-center font-bold tracking-wider">
+            <i class="fa-solid fa-layer-group text-indigo-400 mr-2"></i> 發票解析工作台 v8 (流水帳模式)
         </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- 左側：圖片與畫布區 -->
-            <div class="lg:col-span-2 bg-white p-4 rounded-xl shadow-sm space-y-4">
-                <input type="file" id="fileInput" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" accept="image/*">
-                
-                <div id="canvas-container" class="rounded-lg min-h-[300px]">
-                    <canvas id="mainCanvas"></canvas>
-                </div>
-            </div>
-
-            <!-- 右側：控制面板與結果 -->
-            <div class="bg-white p-6 rounded-xl shadow-sm flex flex-col h-full space-y-4">
-                
-                <div>
-                    <h3 class="font-bold mb-3 text-gray-700">1. 選擇標記類型並在左側畫框</h3>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button class="mode-btn bg-green-50 text-green-700 border border-green-300 py-2 rounded font-medium hover:bg-green-100 transition" data-mode="invoice" data-color="#22c55e">
-                            發票號碼 (綠)
-                        </button>
-                        <button class="mode-btn bg-red-50 text-red-700 border border-red-300 py-2 rounded font-medium hover:bg-red-100 transition" data-mode="title" data-color="#ef4444">
-                            賣方抬頭 (紅)
-                        </button>
-                        <button class="mode-btn bg-blue-50 text-blue-700 border border-blue-300 py-2 rounded font-medium hover:bg-blue-100 transition" data-mode="taxid" data-color="#3b82f6">
-                            賣方統編 (藍)
-                        </button>
-                        <button class="mode-btn bg-yellow-50 text-yellow-700 border border-yellow-300 py-2 rounded font-medium hover:bg-yellow-100 transition" data-mode="amount" data-color="#eab308">
-                            總計金額 (黃)
-                        </button>
-                    </div>
-                </div>
-
-                <!-- 執行辨識按鈕 -->
-                <button id="startScanBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold transition flex justify-center items-center shadow-md">
-                    <i class="fa-solid fa-expand mr-2"></i> 開始 WebAssembly 辨識
-                </button>
-
-                <!-- 辨識狀態 -->
-                <div id="statusArea" class="text-sm font-medium text-indigo-600 hidden flex items-center p-2 bg-indigo-50 rounded-lg">
-                    <i class="fa-solid fa-spinner fa-spin mr-2"></i> <span id="statusText">正在載入 WebAssembly 核心...</span>
-                </div>
-
-                <!-- LINE 回報資訊 -->
-                <div class="flex-grow flex flex-col pt-2 border-t">
-                    <h3 class="font-bold mb-2 text-gray-700 flex justify-between items-center">
-                        2. 擷取結果
-                        <button id="clearBtn" class="text-xs text-red-500 hover:text-red-700 underline px-2 py-1"><i class="fa-solid fa-trash-can"></i> 清除畫布</button>
-                    </h3>
-                    <textarea id="lineOutput" class="w-full flex-grow p-4 bg-gray-800 text-green-400 font-mono text-sm rounded-lg focus:outline-none" readonly style="min-height: 180px;">📌 【請款回報】
-----------------------
-🧾 發票號碼：
-🏢 賣方抬頭：
-🏷️ 賣方統編：
-💰 總計金額：
-----------------------
-備註：無</textarea>
-                    
-                    <button id="copyBtn" class="mt-3 w-full bg-gray-800 hover:bg-black text-white py-2 rounded-lg font-medium transition flex justify-center items-center">
-                        <i class="fa-regular fa-copy mr-2"></i> 複製回報
-                    </button>
-                </div>
-
-            </div>
+        <div id="statusArea" class="text-xs text-indigo-300 flex items-center font-medium hidden">
+            <i class="fa-solid fa-spinner fa-spin mr-2"></i> <span id="statusText">載入引擎中...</span>
         </div>
     </div>
 
-    <!-- 隱藏的 Canvas 用於處理影像二值化給 Wasm 引擎 -->
+    <!-- 分頁系統 (Tabs) -->
+    <div class="bg-gray-100 border-b border-gray-300 flex overflow-x-auto shrink-0" id="tabsContainer">
+        <!-- 分頁按鈕由 JS 動態生成 -->
+    </div>
+
+    <!-- 工具列 (Toolbar) -->
+    <div class="bg-white border-b border-gray-300 px-3 py-2 flex flex-wrap gap-2 items-center shrink-0">
+        <label class="toolbar-btn bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 mr-2">
+            <i class="fa-regular fa-image mr-1"></i> 載入圖片
+            <input type="file" id="fileInput" class="hidden" accept="image/*">
+        </label>
+        
+        <div class="h-4 border-r border-gray-300 mx-1"></div>
+
+        <!-- 標記工具 -->
+        <button class="toolbar-btn mode-btn bg-pink-50 text-pink-700 border-pink-300" data-mode="date" data-color="#ec4899">日期 (粉紅)</button>
+        <button class="toolbar-btn mode-btn bg-green-50 text-green-700 border-green-300" data-mode="invoice" data-color="#22c55e">號碼 (綠)</button>
+        <button class="toolbar-btn mode-btn bg-red-50 text-red-700 border-red-300" data-mode="title" data-color="#ef4444">抬頭 (紅)</button>
+        <button class="toolbar-btn mode-btn bg-blue-50 text-blue-700 border-blue-300" data-mode="taxid" data-color="#3b82f6">統編 (藍)</button>
+        <button class="toolbar-btn mode-btn bg-yellow-50 text-yellow-700 border-yellow-300" data-mode="amount" data-color="#eab308">總計 (黃)</button>
+        
+        <div class="h-4 border-r border-gray-300 mx-1"></div>
+        
+        <button class="toolbar-btn mode-btn bg-purple-50 text-purple-700 border-purple-400" data-mode="leftQR" data-color="#a855f7"><i class="fa-solid fa-qrcode mr-1"></i> 左QR (紫)</button>
+        <button class="toolbar-btn mode-btn bg-orange-50 text-orange-700 border-orange-400" data-mode="rightQR" data-color="#f97316"><i class="fa-solid fa-qrcode mr-1"></i> 右QR (橘)</button>
+
+        <div class="flex-grow"></div>
+
+        <button id="clearRectsBtn" class="toolbar-btn text-gray-500 hover:bg-gray-100"><i class="fa-solid fa-eraser"></i> 清除框線</button>
+        <button id="startScanBtn" class="toolbar-btn bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm ml-2 px-4"><i class="fa-solid fa-bolt mr-1"></i> 開始辨識</button>
+    </div>
+
+    <!-- 主要工作區 (分左右兩欄) -->
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 左欄：畫布區 (佔比 65%) -->
+        <div id="canvas-wrapper" class="w-[65%]">
+            <canvas id="mainCanvas"></canvas>
+            <div id="placeholderText" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-gray-500 text-center pointer-events-none">
+                <i class="fa-solid fa-file-import text-4xl mb-2 text-gray-400"></i><br>
+                請由上方「載入圖片」開始
+            </div>
+        </div>
+
+        <!-- 右欄：純文字編輯區 (佔比 35%) -->
+        <div class="w-[35%] bg-white flex flex-col border-l border-gray-300">
+            <div class="bg-gray-50 px-3 py-2 border-b border-gray-200 flex justify-between items-center shrink-0">
+                <span class="font-bold text-gray-700"><i class="fa-solid fa-pen-to-square mr-1"></i> 段落編輯與回報區</span>
+                <button id="copyBtn" class="text-xs bg-gray-800 text-white px-3 py-1 rounded hover:bg-black transition"><i class="fa-regular fa-copy"></i> 一鍵複製</button>
+            </div>
+            
+            <!-- 高密度編輯區，完全自由修改 -->
+            <textarea id="editorArea" class="flex-grow p-4 bg-gray-900 text-green-400 font-mono text-[13px] leading-relaxed w-full"></textarea>
+        </div>
+    </div>
+
+    <!-- 隱藏的預處理畫布 -->
     <canvas id="cropCanvas" class="hidden"></canvas>
 
     <script>
+        // DOM 元素
+        const tabsContainer = document.getElementById('tabsContainer');
         const fileInput = document.getElementById('fileInput');
         const mainCanvas = document.getElementById('mainCanvas');
         const ctx = mainCanvas.getContext('2d');
         const cropCanvas = document.getElementById('cropCanvas');
         const cropCtx = cropCanvas.getContext('2d', { willReadFrequently: true });
         
-        const lineOutput = document.getElementById('lineOutput');
+        const editorArea = document.getElementById('editorArea');
         const statusArea = document.getElementById('statusArea');
         const statusText = document.getElementById('statusText');
         const modeBtns = document.querySelectorAll('.mode-btn');
+        const placeholderText = document.getElementById('placeholderText');
 
-        let img = new Image();
-        let imageLoaded = false;
-        let scale = 1;
+        // === 狀態管理 (多頁籤核心) ===
+        let tabs = [];
+        let activeTabId = null;
+        let tabCounter = 1;
 
-        // 塗鴉狀態與儲存區塊
+        // 塗鴉全域狀態
         let currentMode = null;
         let currentColor = null;
         let isDrawing = false;
         let startX, startY;
-        
-        // 儲存已畫的框與辨識結果
-        let drawnRects = {}; 
-        let boxesText = {}; 
+        let scale = 1;
 
-        // 初始化 Tesseract WebAssembly Worker
+        // 預設樣板
+        const defaultTemplate = `📌 【請款回報】
+----------------------
+📅 憑證日期：
+🧾 發票號碼：
+🏢 賣方抬頭：
+🏷️ 賣方統編：
+💰 總計金額：
+----------------------
+【深度解析備註】
+(尚未掃描或手動補充)
+----------------------`;
+
+        // 初始化 Tesseract WebAssembly
         let worker = null;
         async function initWasmEngine() {
             statusArea.classList.remove('hidden');
-            statusText.innerText = "正在載入 WebAssembly OCR 核心...";
-            // 載入英文與繁體中文包
+            statusText.innerText = "載入 OCR 核心...";
             worker = await Tesseract.createWorker('eng+chi_tra');
             statusArea.classList.add('hidden');
         }
         initWasmEngine();
 
-        // 處理圖片上傳
+        // === 分頁系統操作 ===
+        function createTab() {
+            const id = 'tab_' + Date.now();
+            const newTab = {
+                id: id,
+                title: `發票 ${tabCounter++}`,
+                imgObj: new Image(),
+                imgLoaded: false,
+                drawnRects: {},
+                boxesText: {},
+                editorContent: defaultTemplate
+            };
+            tabs.push(newTab);
+            renderTabs();
+            switchTab(id);
+        }
+
+        function renderTabs() {
+            tabsContainer.innerHTML = '';
+            tabs.forEach(tab => {
+                const btn = document.createElement('div');
+                btn.className = `tab-btn ${tab.id === activeTabId ? 'active' : ''}`;
+                btn.innerHTML = `
+                    <i class="fa-solid fa-file-lines mr-2"></i> ${tab.title}
+                    ${tabs.length > 1 ? `<i class="fa-solid fa-xmark ml-3 text-gray-400 hover:text-red-500" onclick="closeTab('${tab.id}', event)"></i>` : ''}
+                `;
+                btn.onclick = () => switchTab(tab.id);
+                tabsContainer.appendChild(btn);
+            });
+            // 新增分頁按鈕
+            const addBtn = document.createElement('div');
+            addBtn.className = 'tab-btn text-indigo-600 hover:text-indigo-800';
+            addBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
+            addBtn.onclick = createTab;
+            tabsContainer.appendChild(addBtn);
+        }
+
+        function switchTab(id) {
+            // 切換前，保存當前文字編輯器的內容
+            if (activeTabId) {
+                const oldTab = tabs.find(t => t.id === activeTabId);
+                if (oldTab) oldTab.editorContent = editorArea.value;
+            }
+            activeTabId = id;
+            renderTabs();
+            syncUIWithActiveTab();
+        }
+
+        function closeTab(id, event) {
+            event.stopPropagation();
+            const index = tabs.findIndex(t => t.id === id);
+            tabs.splice(index, 1);
+            if (activeTabId === id) {
+                switchTab(tabs[Math.max(0, index - 1)].id);
+            } else {
+                renderTabs();
+            }
+        }
+
+        function getActiveTab() {
+            return tabs.find(t => t.id === activeTabId);
+        }
+
+        function syncUIWithActiveTab() {
+            const tab = getActiveTab();
+            editorArea.value = tab.editorContent;
+            
+            if (tab.imgLoaded) {
+                placeholderText.style.display = 'none';
+                calculateScale(tab.imgObj);
+                redrawCanvas();
+            } else {
+                ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+                mainCanvas.width = 0;
+                mainCanvas.height = 0;
+                placeholderText.style.display = 'block';
+            }
+        }
+
+        // 初始化第一個分頁
+        createTab();
+
+        // 編輯器內容改變時自動存入狀態
+        editorArea.addEventListener('input', () => {
+            const tab = getActiveTab();
+            if (tab) tab.editorContent = editorArea.value;
+        });
+
+        // 圖片上傳 (綁定至當前分頁)
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
+            const tab = getActiveTab();
             const reader = new FileReader();
             reader.onload = (event) => {
-                img.onload = () => {
-                    imageLoaded = true;
-                    // 清空之前的紀錄
-                    drawnRects = {};
-                    boxesText = {};
-                    updateLineOutput();
-                    
-                    // 自適應寬度
-                    const containerWidth = document.getElementById('canvas-container').clientWidth;
-                    scale = containerWidth / img.width;
-                    if(scale > 1) scale = 1; 
-                    
-                    mainCanvas.width = img.width * scale;
-                    mainCanvas.height = img.height * scale;
-                    redrawCanvas();
+                tab.imgObj.onload = () => {
+                    tab.imgLoaded = true;
+                    tab.drawnRects = {}; // 清空舊框
+                    syncUIWithActiveTab();
                 }
-                img.src = event.target.result;
+                tab.imgObj.src = event.target.result;
             }
             reader.readAsDataURL(file);
+            fileInput.value = ''; // 允許重複上傳同檔名
         });
 
-        // 選擇塗鴉模式
+        // === 畫布與塗鴉邏輯 ===
+        function calculateScale(img) {
+            const wrapper = document.getElementById('canvas-wrapper');
+            // 高密度排版：讓圖片預設適應寬度，但若高度過長則適應高度
+            const wRatio = (wrapper.clientWidth - 20) / img.width;
+            scale = wRatio > 1 ? 1 : wRatio;
+            mainCanvas.width = img.width * scale;
+            mainCanvas.height = img.height * scale;
+        }
+
         modeBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 modeBtns.forEach(b => b.classList.remove('active'));
@@ -167,51 +272,46 @@
             });
         });
 
-        // 取得正確座標 (兼容滑鼠與手機觸控)
         function getPos(e) {
             const rect = mainCanvas.getBoundingClientRect();
-            // 判斷是 touch 還是 mouse 事件
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return {
-                x: clientX - rect.left,
-                y: clientY - rect.top
-            };
+            return { x: clientX - rect.left, y: clientY - rect.top };
         }
 
-        // 開始畫框
+        mainCanvas.addEventListener('mousedown', startDraw);
+        mainCanvas.addEventListener('mousemove', drawMove);
+        mainCanvas.addEventListener('mouseup', endDraw);
+        mainCanvas.addEventListener('mouseout', () => isDrawing = false);
+
+        mainCanvas.addEventListener('touchstart', startDraw, { passive: false });
+        mainCanvas.addEventListener('touchmove', drawMove, { passive: false });
+        mainCanvas.addEventListener('touchend', endDraw);
+
         function startDraw(e) {
-            if (!imageLoaded || !currentMode) {
-                if(!currentMode && e.type !== 'touchstart') alert('請先點選右方的「資料類型」按鈕來選擇顏色');
-                return;
-            }
+            const tab = getActiveTab();
+            if (!tab || !tab.imgLoaded || !currentMode) return;
             isDrawing = true;
             const pos = getPos(e);
             startX = pos.x;
             startY = pos.y;
         }
 
-        // 畫框拖曳中
         function drawMove(e) {
             if (!isDrawing) return;
-            e.preventDefault(); // 防止手機畫面滑動
+            e.preventDefault(); 
             const pos = getPos(e);
-            
             redrawCanvas();
-            // 畫出正在拖曳的虛擬框
             ctx.strokeStyle = currentColor;
             ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]);
+            ctx.setLineDash([4, 4]);
             ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
             ctx.setLineDash([]);
         }
 
-        // 結束畫框
         function endDraw(e) {
             if (!isDrawing) return;
             isDrawing = false;
-            
-            // touchend 取不到 touches[0]，所以改用 changedTouches
             const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
             const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
             const rect = mainCanvas.getBoundingClientRect();
@@ -227,132 +327,197 @@
                 color: currentColor
             };
 
-            // 太小的框忽略
-            if(box.w < 10 || box.h < 10) {
-                redrawCanvas();
-                return;
-            }
+            if(box.w < 10 || box.h < 10) { redrawCanvas(); return; }
 
-            // 儲存該類別的框
-            drawnRects[currentMode] = box;
+            const tab = getActiveTab();
+            tab.drawnRects[currentMode] = box;
             redrawCanvas();
         }
 
-        // 綁定 Mouse 事件
-        mainCanvas.addEventListener('mousedown', startDraw);
-        mainCanvas.addEventListener('mousemove', drawMove);
-        mainCanvas.addEventListener('mouseup', endDraw);
-        mainCanvas.addEventListener('mouseout', () => isDrawing = false);
-
-        // 綁定 Touch 事件 (手機支援)
-        mainCanvas.addEventListener('touchstart', startDraw, { passive: false });
-        mainCanvas.addEventListener('touchmove', drawMove, { passive: false });
-        mainCanvas.addEventListener('touchend', endDraw);
-
-        // 重繪畫布 (包含圖片與所有已存的框)
         function redrawCanvas() {
-            if(!imageLoaded) return;
+            const tab = getActiveTab();
+            if(!tab || !tab.imgLoaded) return;
             ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
-            ctx.drawImage(img, 0, 0, mainCanvas.width, mainCanvas.height);
+            ctx.drawImage(tab.imgObj, 0, 0, mainCanvas.width, mainCanvas.height);
 
-            // 畫出所有已記錄的框
-            for (const mode in drawnRects) {
-                const box = drawnRects[mode];
+            for (const mode in tab.drawnRects) {
+                const box = tab.drawnRects[mode];
                 if (box) {
                     ctx.strokeStyle = box.color;
                     ctx.lineWidth = 2;
                     ctx.strokeRect(box.x * scale, box.y * scale, box.w * scale, box.h * scale);
-                    
-                    // 加上微透明背景
-                    ctx.fillStyle = box.color + '22'; // 10% opacity
+                    ctx.fillStyle = box.color + '33'; 
                     ctx.fillRect(box.x * scale, box.y * scale, box.w * scale, box.h * scale);
                 }
             }
         }
 
-        // 統一開始掃描 (按下按鈕後執行)
+        document.getElementById('clearRectsBtn').addEventListener('click', () => {
+            const tab = getActiveTab();
+            if(tab) { tab.drawnRects = {}; redrawCanvas(); }
+        });
+
+        // === 智慧辨識與轉換核心 ===
         document.getElementById('startScanBtn').addEventListener('click', async () => {
-            if (!worker) {
-                alert('WebAssembly 引擎尚未載入完畢，請稍候。');
-                return;
-            }
-            if (Object.keys(drawnRects).length === 0) {
-                alert('請先在圖片上畫出標記框！');
-                return;
-            }
+            if (!worker) { alert('引擎載入中，請稍候。'); return; }
+            const tab = getActiveTab();
+            if (!tab || Object.keys(tab.drawnRects).length === 0) { alert('請先畫框標記！'); return; }
 
             statusArea.classList.remove('hidden');
             
-            // 依序處理每個已畫的框
-            for (const mode in drawnRects) {
-                const box = drawnRects[mode];
-                statusText.innerText = `Wasm 處理中... (${getModeName(mode)})`;
-                await processCropAndRecognize(box, mode);
+            for (const mode in tab.drawnRects) {
+                const box = tab.drawnRects[mode];
+                statusText.innerText = `解析中...`;
+                
+                if(mode === 'leftQR' || mode === 'rightQR') {
+                    await processQRDecode(tab, box, mode);
+                } else {
+                    await processCropAndRecognize(tab, box, mode);
+                }
             }
 
+            updateEditorTemplate(tab);
             statusArea.classList.add('hidden');
-            updateLineOutput();
         });
 
-        // 裁切、去底紋與辨識核心
-        async function processCropAndRecognize(box, mode) {
+        async function processCropAndRecognize(tab, box, mode) {
             cropCanvas.width = box.w;
             cropCanvas.height = box.h;
-            cropCtx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+            cropCtx.drawImage(tab.imgObj, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
 
-            // 影像二值化預處理 (去除發票防偽浮水印)
+            // 二值化去底紋
             const imageData = cropCtx.getImageData(0, 0, cropCanvas.width, cropCanvas.height);
             const data = imageData.data;
-            const threshold = 140; 
-            
             for (let i = 0; i < data.length; i += 4) {
                 const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-                const v = gray >= threshold ? 255 : 0;
-                data[i] = data[i+1] = data[i+2] = v;
+                data[i] = data[i+1] = data[i+2] = gray >= 140 ? 255 : 0;
             }
             cropCtx.putImageData(imageData, 0, 0);
-            const processedImgDataUrl = cropCanvas.toDataURL('image/jpeg');
-
+            
+            const url = cropCanvas.toDataURL('image/jpeg');
             try {
-                const { data: { text } } = await worker.recognize(processedImgDataUrl);
-                // 處理特殊字元並清理換行
-                const cleanText = text.replace(/\n/g, '').replace(/\|/g, '').trim();
-                boxesText[mode] = cleanText;
-            } catch (err) {
-                console.error(err);
+                const { data: { text } } = await worker.recognize(url);
+                let rawText = text.replace(/[\n\|]/g, '').trim();
+                
+                // 【核心升級】：如果是總金額，嘗試進行國字大寫轉數字
+                if (mode === 'amount') {
+                    rawText = convertChineseToNumber(rawText);
+                }
+                tab.boxesText[mode] = rawText;
+            } catch (err) { console.error(err); }
+        }
+
+        // 國字大寫轉數字引擎 (容錯版)
+        function convertChineseToNumber(text) {
+            // 替換常見 OCR 錯字，並移除冗餘字元
+            const errorMap = {'臺':'壹','台':'壹','貳':'貳','贰':'貳','叁':'參','参':'參','肆':'肆','伍':'伍','陸':'陸','陆':'陸','柒':'柒','捌':'捌','玖':'玖','拾':'拾','佰':'佰','仟':'仟','萬':'萬','O':'0','o':'0'};
+            let cleanStr = text.replace(/[元整正,， ]/g, '');
+            let normStr = '';
+            for(let char of cleanStr) normStr += errorMap[char] || char;
+
+            // 如果已經是純數字，直接回傳
+            if (/^\d+$/.test(normStr)) return normStr;
+
+            const numMap = {'零':0,'一':1,'壹':1,'二':2,'貳':2,'兩':2,'三':3,'參':3,'四':4,'肆':4,'五':5,'伍':5,'六':6,'陸':6,'七':7,'柒':7,'八':8,'捌':8,'九':9,'玖':9};
+            const unitMap = {'十':10,'拾':10,'百':100,'佰':100,'千':1000,'仟':1000,'萬':10000};
+
+            let result = 0, temp = 0, wan = 0;
+            for (let i = 0; i < normStr.length; i++) {
+                let char = normStr[i];
+                if (numMap[char] !== undefined) {
+                    temp = numMap[char];
+                } else if (unitMap[char] !== undefined) {
+                    let unit = unitMap[char];
+                    if (unit === 10000) {
+                        wan = (result + (temp === 0 ? 0 : temp)) * unit;
+                        result = 0; temp = 0;
+                    } else {
+                        if (temp === 0 && unit === 10) temp = 1; // 處理「拾」開頭
+                        result += temp * unit;
+                        temp = 0;
+                    }
+                }
+            }
+            result += temp + wan;
+            return result > 0 ? result.toString() : text; // 若轉換失敗，保留原始 OCR 結果供手動修改
+        }
+
+        async function processQRDecode(tab, box, mode) {
+            cropCanvas.width = box.w;
+            cropCanvas.height = box.h;
+            cropCtx.drawImage(tab.imgObj, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+            const imageData = cropCtx.getImageData(0, 0, cropCanvas.width, cropCanvas.height);
+            
+            const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
+            if (code) {
+                const qrText = code.data;
+                if(mode === 'leftQR') {
+                    parseMOFLeftQR(tab, qrText);
+                } else {
+                    tab.boxesText['qrData'] = (tab.boxesText['qrData'] || '') + `[右側明細]\n${qrText}\n`;
+                }
             }
         }
 
-        function getModeName(mode) {
-            const names = { invoice: '發票號碼', title: '賣方抬頭', taxid: '賣方統編', amount: '總計金額' };
-            return names[mode] || mode;
+        function parseMOFLeftQR(tab, qrText) {
+            if (qrText.length >= 77 && /^[A-Z]{2}\d{8}/.test(qrText)) {
+                try {
+                    const invNum = qrText.substring(0, 10);
+                    const rocYear = qrText.substring(10, 13);
+                    const month = qrText.substring(13, 15);
+                    const day = qrText.substring(15, 17);
+                    const totalHex = qrText.substring(29, 37);
+                    const sellerId = qrText.substring(45, 53);
+                    const totalAmt = parseInt(totalHex, 16);
+
+                    if (!tab.boxesText['invoice']) tab.boxesText['invoice'] = invNum;
+                    if (!tab.boxesText['taxid']) tab.boxesText['taxid'] = sellerId;
+                    if (!tab.boxesText['amount']) tab.boxesText['amount'] = totalAmt.toString();
+                    if (!tab.boxesText['date']) tab.boxesText['date'] = `${rocYear}/${month}/${day}`;
+                    
+                    tab.boxesText['qrData'] = (tab.boxesText['qrData'] || '') + `[左QR驗證成功] 總額: $${totalAmt}\n`;
+                } catch (e) {}
+            }
         }
 
-        function updateLineOutput() {
-            lineOutput.value = `📌 【請款回報】
+        // 將掃描結果推入段落編輯區
+        function updateEditorTemplate(tab) {
+            const b = tab.boxesText;
+            const newContent = `📌 【請款回報】
 ----------------------
-🧾 發票號碼：${boxesText['invoice'] || ''}
-🏢 賣方抬頭：${boxesText['title'] || ''}
-🏷️ 賣方統編：${boxesText['taxid'] || ''}
-💰 總計金額：${boxesText['amount'] || ''}
+📅 憑證日期：${b['date'] || ''}
+🧾 發票號碼：${b['invoice'] || ''}
+🏢 賣方抬頭：${b['title'] || ''}
+🏷️ 賣方統編：${b['taxid'] || ''}
+💰 總計金額：${b['amount'] || ''}
 ----------------------
-備註：無`;
+【深度解析備註】
+${b['qrData'] ? b['qrData'] : '(一般單據)'}
+----------------------`;
+            tab.editorContent = newContent;
+            editorArea.value = newContent;
         }
 
-        document.getElementById('clearBtn').addEventListener('click', () => {
-            drawnRects = {};
-            boxesText = {};
-            redrawCanvas();
-            updateLineOutput();
+        // 複製功能
+        document.getElementById('copyBtn').addEventListener('click', async () => {
+            await navigator.clipboard.writeText(editorArea.value);
+            const btn = document.getElementById('copyBtn');
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> 已複製';
+            btn.classList.replace('bg-gray-800', 'bg-green-600');
+            setTimeout(() => {
+                btn.innerHTML = '<i class="fa-regular fa-copy"></i> 一鍵複製';
+                btn.classList.replace('bg-green-600', 'bg-gray-800');
+            }, 2000);
         });
 
-        document.getElementById('copyBtn').addEventListener('click', async () => {
-            await navigator.clipboard.writeText(lineOutput.value);
-            const btn = document.getElementById('copyBtn');
-            btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i> 已複製';
-            setTimeout(() => {
-                btn.innerHTML = '<i class="fa-regular fa-copy mr-2"></i> 複製回報';
-            }, 2000);
+        // 防止拖曳預設行為
+        window.addEventListener('dragover', e => e.preventDefault());
+        window.addEventListener('drop', e => {
+            e.preventDefault();
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                fileInput.dispatchEvent(new Event('change'));
+            }
         });
     </script>
 </body>
