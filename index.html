@@ -3,13 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>發票解析工作台 - 專業流水帳版</title>
+    <title>發票解析工作台 - 專業流水帳版 (含影像編輯)</title>
+    
+    <!-- 樣式庫與圖示 -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- 核心辨識套件 -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- ★ 新增：Cropper.js 影像裁切轉正套件 ★ -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+
     <style>
         body { background-color: #e5e7eb; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 14px; }
+        
         /* 高密度排版風格 */
         .toolbar-btn { padding: 4px 8px; font-size: 12px; font-weight: bold; border-radius: 4px; border: 1px solid transparent; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; }
         .toolbar-btn.active { border-color: #1f2937; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); transform: scale(0.95); }
@@ -20,10 +30,13 @@
         #canvas-wrapper { position: relative; overflow: auto; flex-grow: 1; background-color: #9ca3af; display: flex; justify-content: center; align-items: flex-start; cursor: crosshair; touch-action: none; padding: 10px; }
         canvas { display: block; max-width: 100%; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); background-color: white; }
         
-        /* 自訂滾動條 */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-thumb { background-color: #9ca3af; border-radius: 3px; }
         textarea { resize: none; outline: none; }
+        
+        /* Cropper 視窗樣式 */
+        #cropperModal { backdrop-filter: blur(4px); }
+        .cropper-view-box, .cropper-face { border-radius: 4px; }
     </style>
 </head>
 <body class="font-sans text-gray-800">
@@ -31,7 +44,7 @@
     <!-- 頂部導航與狀態 -->
     <div class="bg-gray-900 text-white px-4 py-2 flex justify-between items-center shadow-md z-10 shrink-0">
         <div class="flex items-center font-bold tracking-wider">
-            <i class="fa-solid fa-layer-group text-indigo-400 mr-2"></i> 發票解析工作台 v8 (流水帳模式)
+            <i class="fa-solid fa-layer-group text-indigo-400 mr-2"></i> 發票解析工作台 v9 (流水帳 + 影像處理)
         </div>
         <div id="statusArea" class="text-xs text-indigo-300 flex items-center font-medium hidden">
             <i class="fa-solid fa-spinner fa-spin mr-2"></i> <span id="statusText">載入引擎中...</span>
@@ -39,21 +52,24 @@
     </div>
 
     <!-- 分頁系統 (Tabs) -->
-    <div class="bg-gray-100 border-b border-gray-300 flex overflow-x-auto shrink-0" id="tabsContainer">
-        <!-- 分頁按鈕由 JS 動態生成 -->
-    </div>
+    <div class="bg-gray-100 border-b border-gray-300 flex overflow-x-auto shrink-0" id="tabsContainer"></div>
 
     <!-- 工具列 (Toolbar) -->
     <div class="bg-white border-b border-gray-300 px-3 py-2 flex flex-wrap gap-2 items-center shrink-0">
-        <label class="toolbar-btn bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 mr-2">
+        <label class="toolbar-btn bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 mr-1">
             <i class="fa-regular fa-image mr-1"></i> 載入圖片
             <input type="file" id="fileInput" class="hidden" accept="image/*">
         </label>
         
+        <!-- ★ 新增：影像裁切轉正按鈕 ★ -->
+        <button id="openCropBtn" class="toolbar-btn bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 mr-2">
+            <i class="fa-solid fa-crop-simple mr-1"></i> 裁切/轉正
+        </button>
+        
         <div class="h-4 border-r border-gray-300 mx-1"></div>
 
         <!-- 標記工具 -->
-        <button class="toolbar-btn mode-btn bg-pink-50 text-pink-700 border-pink-300" data-mode="date" data-color="#ec4899">日期 (粉紅)</button>
+        <button class="toolbar-btn mode-btn bg-pink-50 text-pink-700 border-pink-300" data-mode="date" data-color="#ec4899">日期 (粉)</button>
         <button class="toolbar-btn mode-btn bg-green-50 text-green-700 border-green-300" data-mode="invoice" data-color="#22c55e">號碼 (綠)</button>
         <button class="toolbar-btn mode-btn bg-red-50 text-red-700 border-red-300" data-mode="title" data-color="#ef4444">抬頭 (紅)</button>
         <button class="toolbar-btn mode-btn bg-blue-50 text-blue-700 border-blue-300" data-mode="taxid" data-color="#3b82f6">統編 (藍)</button>
@@ -61,8 +77,8 @@
         
         <div class="h-4 border-r border-gray-300 mx-1"></div>
         
-        <button class="toolbar-btn mode-btn bg-purple-50 text-purple-700 border-purple-400" data-mode="leftQR" data-color="#a855f7"><i class="fa-solid fa-qrcode mr-1"></i> 左QR (紫)</button>
-        <button class="toolbar-btn mode-btn bg-orange-50 text-orange-700 border-orange-400" data-mode="rightQR" data-color="#f97316"><i class="fa-solid fa-qrcode mr-1"></i> 右QR (橘)</button>
+        <button class="toolbar-btn mode-btn bg-purple-50 text-purple-700 border-purple-400" data-mode="leftQR" data-color="#a855f7"><i class="fa-solid fa-qrcode mr-1"></i> 左QR</button>
+        <button class="toolbar-btn mode-btn bg-orange-50 text-orange-700 border-orange-400" data-mode="rightQR" data-color="#f97316"><i class="fa-solid fa-qrcode mr-1"></i> 右QR</button>
 
         <div class="flex-grow"></div>
 
@@ -70,9 +86,8 @@
         <button id="startScanBtn" class="toolbar-btn bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm ml-2 px-4"><i class="fa-solid fa-bolt mr-1"></i> 開始辨識</button>
     </div>
 
-    <!-- 主要工作區 (分左右兩欄) -->
+    <!-- 主要工作區 -->
     <div class="flex flex-1 overflow-hidden">
-        <!-- 左欄：畫布區 (佔比 65%) -->
         <div id="canvas-wrapper" class="w-[65%]">
             <canvas id="mainCanvas"></canvas>
             <div id="placeholderText" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-gray-500 text-center pointer-events-none">
@@ -81,20 +96,40 @@
             </div>
         </div>
 
-        <!-- 右欄：純文字編輯區 (佔比 35%) -->
         <div class="w-[35%] bg-white flex flex-col border-l border-gray-300">
             <div class="bg-gray-50 px-3 py-2 border-b border-gray-200 flex justify-between items-center shrink-0">
-                <span class="font-bold text-gray-700"><i class="fa-solid fa-pen-to-square mr-1"></i> 段落編輯與回報區</span>
+                <span class="font-bold text-gray-700"><i class="fa-solid fa-pen-to-square mr-1"></i> 編輯與回報區</span>
                 <button id="copyBtn" class="text-xs bg-gray-800 text-white px-3 py-1 rounded hover:bg-black transition"><i class="fa-regular fa-copy"></i> 一鍵複製</button>
             </div>
-            
-            <!-- 高密度編輯區，完全自由修改 -->
             <textarea id="editorArea" class="flex-grow p-4 bg-gray-900 text-green-400 font-mono text-[13px] leading-relaxed w-full"></textarea>
         </div>
     </div>
 
     <!-- 隱藏的預處理畫布 -->
     <canvas id="cropCanvas" class="hidden"></canvas>
+
+    <!-- ★ 新增：Cropper 影像處理全螢幕浮動視窗 ★ -->
+    <div id="cropperModal" class="fixed inset-0 bg-black bg-opacity-80 z-50 hidden flex flex-col">
+        <!-- 頂部控制列 -->
+        <div class="bg-gray-900 p-4 flex justify-between items-center text-white shrink-0">
+            <h3 class="font-bold text-lg"><i class="fa-solid fa-crop-simple mr-2"></i>影像裁切與轉正</h3>
+            <div class="flex gap-2">
+                <button id="cropRotateLeft" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm"><i class="fa-solid fa-rotate-left mr-1"></i> 左轉 90°</button>
+                <button id="cropRotateRight" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm"><i class="fa-solid fa-rotate-right mr-1"></i> 右轉 90°</button>
+                <button id="cropReset" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm"><i class="fa-solid fa-arrow-rotate-left mr-1"></i> 重設</button>
+            </div>
+            <div class="flex gap-2">
+                <button id="cropCancel" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm font-bold">取消</button>
+                <button id="cropConfirm" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-bold"><i class="fa-solid fa-check mr-1"></i> 儲存並套用</button>
+            </div>
+        </div>
+        <!-- 裁切工作區 -->
+        <div class="flex-grow overflow-hidden relative bg-gray-800 flex justify-center items-center p-4">
+            <div class="w-full h-full max-w-5xl">
+                <img id="cropperImage" src="" alt="待裁切圖片" class="max-w-full max-h-full block">
+            </div>
+        </div>
+    </div>
 
     <script>
         // DOM 元素
@@ -111,19 +146,22 @@
         const modeBtns = document.querySelectorAll('.mode-btn');
         const placeholderText = document.getElementById('placeholderText');
 
-        // === 狀態管理 (多頁籤核心) ===
+        // Cropper DOM
+        const cropperModal = document.getElementById('cropperModal');
+        const cropperImage = document.getElementById('cropperImage');
+        let cropper = null;
+
+        // 狀態管理
         let tabs = [];
         let activeTabId = null;
         let tabCounter = 1;
 
-        // 塗鴉全域狀態
         let currentMode = null;
         let currentColor = null;
         let isDrawing = false;
         let startX, startY;
         let scale = 1;
 
-        // 預設樣板
         const defaultTemplate = `📌 【請款回報】
 ----------------------
 📅 憑證日期：
@@ -175,7 +213,6 @@
                 btn.onclick = () => switchTab(tab.id);
                 tabsContainer.appendChild(btn);
             });
-            // 新增分頁按鈕
             const addBtn = document.createElement('div');
             addBtn.className = 'tab-btn text-indigo-600 hover:text-indigo-800';
             addBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
@@ -184,7 +221,6 @@
         }
 
         function switchTab(id) {
-            // 切換前，保存當前文字編輯器的內容
             if (activeTabId) {
                 const oldTab = tabs.find(t => t.id === activeTabId);
                 if (oldTab) oldTab.editorContent = editorArea.value;
@@ -205,9 +241,7 @@
             }
         }
 
-        function getActiveTab() {
-            return tabs.find(t => t.id === activeTabId);
-        }
+        function getActiveTab() { return tabs.find(t => t.id === activeTabId); }
 
         function syncUIWithActiveTab() {
             const tab = getActiveTab();
@@ -225,16 +259,14 @@
             }
         }
 
-        // 初始化第一個分頁
         createTab();
 
-        // 編輯器內容改變時自動存入狀態
         editorArea.addEventListener('input', () => {
             const tab = getActiveTab();
             if (tab) tab.editorContent = editorArea.value;
         });
 
-        // 圖片上傳 (綁定至當前分頁)
+        // 圖片上傳
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -243,19 +275,81 @@
             reader.onload = (event) => {
                 tab.imgObj.onload = () => {
                     tab.imgLoaded = true;
-                    tab.drawnRects = {}; // 清空舊框
+                    tab.drawnRects = {}; 
                     syncUIWithActiveTab();
                 }
                 tab.imgObj.src = event.target.result;
             }
             reader.readAsDataURL(file);
-            fileInput.value = ''; // 允許重複上傳同檔名
+            fileInput.value = ''; 
         });
 
-        // === 畫布與塗鴉邏輯 ===
+        // === ★ 影像裁切轉正核心邏輯 (Cropper.js) ★ ===
+        document.getElementById('openCropBtn').addEventListener('click', () => {
+            const tab = getActiveTab();
+            if (!tab || !tab.imgLoaded) {
+                alert('請先載入圖片！');
+                return;
+            }
+            // 顯示 Modal 並載入圖片
+            cropperImage.src = tab.imgObj.src;
+            cropperModal.classList.remove('hidden');
+            
+            // 初始化 Cropper
+            if (cropper) cropper.destroy();
+            cropper = new Cropper(cropperImage, {
+                viewMode: 1, // 限制裁切框不能超出圖片邊界
+                dragMode: 'crop',
+                autoCropArea: 0.9, // 預設裁切框大小
+                restore: false,
+                guides: true,
+                center: true,
+                highlight: false,
+                cropBoxMovable: true,
+                cropBoxResizable: true,
+                toggleDragModeOnDblclick: false,
+            });
+        });
+
+        // 旋轉控制
+        document.getElementById('cropRotateLeft').addEventListener('click', () => cropper && cropper.rotate(-90));
+        document.getElementById('cropRotateRight').addEventListener('click', () => cropper && cropper.rotate(90));
+        document.getElementById('cropReset').addEventListener('click', () => cropper && cropper.reset());
+
+        // 取消裁切
+        document.getElementById('cropCancel').addEventListener('click', () => {
+            cropperModal.classList.add('hidden');
+            if (cropper) { cropper.destroy(); cropper = null; }
+        });
+
+        // 儲存裁切並套用到當前分頁
+        document.getElementById('cropConfirm').addEventListener('click', () => {
+            if (!cropper) return;
+            // 取得處理後的高畫質 Canvas
+            const croppedCanvas = cropper.getCroppedCanvas({
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+            });
+            
+            const tab = getActiveTab();
+            // 轉成 DataURL 並更新圖片
+            tab.imgObj.onload = () => {
+                // 清空原有的畫框 (因為圖片尺寸與位置已經改變)
+                tab.drawnRects = {};
+                syncUIWithActiveTab();
+                
+                // 關閉 Modal
+                cropperModal.classList.add('hidden');
+                cropper.destroy();
+                cropper = null;
+            };
+            tab.imgObj.src = croppedCanvas.toDataURL('image/jpeg');
+        });
+        // === 裁切邏輯結束 ===
+
+        // === 畫布塗鴉邏輯 ===
         function calculateScale(img) {
             const wrapper = document.getElementById('canvas-wrapper');
-            // 高密度排版：讓圖片預設適應寬度，但若高度過長則適應高度
             const wRatio = (wrapper.clientWidth - 20) / img.width;
             scale = wRatio > 1 ? 1 : wRatio;
             mainCanvas.width = img.width * scale;
@@ -283,7 +377,6 @@
         mainCanvas.addEventListener('mousemove', drawMove);
         mainCanvas.addEventListener('mouseup', endDraw);
         mainCanvas.addEventListener('mouseout', () => isDrawing = false);
-
         mainCanvas.addEventListener('touchstart', startDraw, { passive: false });
         mainCanvas.addEventListener('touchmove', drawMove, { passive: false });
         mainCanvas.addEventListener('touchend', endDraw);
@@ -357,7 +450,7 @@
             if(tab) { tab.drawnRects = {}; redrawCanvas(); }
         });
 
-        // === 智慧辨識與轉換核心 ===
+        // === 智慧辨識核心 ===
         document.getElementById('startScanBtn').addEventListener('click', async () => {
             if (!worker) { alert('引擎載入中，請稍候。'); return; }
             const tab = getActiveTab();
@@ -399,23 +492,19 @@
                 const { data: { text } } = await worker.recognize(url);
                 let rawText = text.replace(/[\n\|]/g, '').trim();
                 
-                // 【核心升級】：如果是總金額，嘗試進行國字大寫轉數字
-                if (mode === 'amount') {
-                    rawText = convertChineseToNumber(rawText);
-                }
+                // 國字大寫轉數字 (金額專用)
+                if (mode === 'amount') rawText = convertChineseToNumber(rawText);
+                
                 tab.boxesText[mode] = rawText;
             } catch (err) { console.error(err); }
         }
 
-        // 國字大寫轉數字引擎 (容錯版)
         function convertChineseToNumber(text) {
-            // 替換常見 OCR 錯字，並移除冗餘字元
             const errorMap = {'臺':'壹','台':'壹','貳':'貳','贰':'貳','叁':'參','参':'參','肆':'肆','伍':'伍','陸':'陸','陆':'陸','柒':'柒','捌':'捌','玖':'玖','拾':'拾','佰':'佰','仟':'仟','萬':'萬','O':'0','o':'0'};
             let cleanStr = text.replace(/[元整正,， ]/g, '');
             let normStr = '';
             for(let char of cleanStr) normStr += errorMap[char] || char;
 
-            // 如果已經是純數字，直接回傳
             if (/^\d+$/.test(normStr)) return normStr;
 
             const numMap = {'零':0,'一':1,'壹':1,'二':2,'貳':2,'兩':2,'三':3,'參':3,'四':4,'肆':4,'五':5,'伍':5,'六':6,'陸':6,'七':7,'柒':7,'八':8,'捌':8,'九':9,'玖':9};
@@ -432,14 +521,14 @@
                         wan = (result + (temp === 0 ? 0 : temp)) * unit;
                         result = 0; temp = 0;
                     } else {
-                        if (temp === 0 && unit === 10) temp = 1; // 處理「拾」開頭
+                        if (temp === 0 && unit === 10) temp = 1; 
                         result += temp * unit;
                         temp = 0;
                     }
                 }
             }
             result += temp + wan;
-            return result > 0 ? result.toString() : text; // 若轉換失敗，保留原始 OCR 結果供手動修改
+            return result > 0 ? result.toString() : text; 
         }
 
         async function processQRDecode(tab, box, mode) {
@@ -451,11 +540,8 @@
             const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
             if (code) {
                 const qrText = code.data;
-                if(mode === 'leftQR') {
-                    parseMOFLeftQR(tab, qrText);
-                } else {
-                    tab.boxesText['qrData'] = (tab.boxesText['qrData'] || '') + `[右側明細]\n${qrText}\n`;
-                }
+                if(mode === 'leftQR') parseMOFLeftQR(tab, qrText);
+                else tab.boxesText['qrData'] = (tab.boxesText['qrData'] || '') + `[右側明細]\n${qrText}\n`;
             }
         }
 
@@ -480,7 +566,6 @@
             }
         }
 
-        // 將掃描結果推入段落編輯區
         function updateEditorTemplate(tab) {
             const b = tab.boxesText;
             const newContent = `📌 【請款回報】
@@ -498,7 +583,6 @@ ${b['qrData'] ? b['qrData'] : '(一般單據)'}
             editorArea.value = newContent;
         }
 
-        // 複製功能
         document.getElementById('copyBtn').addEventListener('click', async () => {
             await navigator.clipboard.writeText(editorArea.value);
             const btn = document.getElementById('copyBtn');
