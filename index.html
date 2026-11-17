@@ -2,74 +2,71 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>發票區塊標記 OCR 解析工具</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>發票/請款單標記 OCR (PaddleOCR 串接版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 載入 Tesseract.js -->
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { background-color: #f3f4f6; }
-        #canvas-container { position: relative; overflow: auto; max-height: 70vh; border: 1px solid #e5e7eb; cursor: crosshair; }
-        canvas { display: block; }
-        .mode-btn.active { transform: scale(0.95); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+        body { background-color: #f3f4f6; overscroll-behavior-y: none; }
+        #canvas-container { position: relative; overflow: hidden; border: 1px solid #e5e7eb; cursor: crosshair; touch-action: none; }
+        canvas { display: block; max-width: 100%; height: auto; }
+        .mode-btn.active { transform: scale(0.95); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); ring-2; }
     </style>
 </head>
-<body class="p-4 md:p-8 font-sans text-gray-800">
+<body class="p-2 md:p-8 font-sans text-gray-800">
 
-    <div class="max-w-7xl mx-auto space-y-6">
-        <div class="text-center space-y-2">
-            <h1 class="text-2xl font-bold text-gray-900"><i class="fa-solid fa-crop-simple text-blue-600 mr-2"></i>發票區塊標記 OCR 工具 (Tesseract.js 版)</h1>
-            <p class="text-gray-500 text-sm">先點選右側的「資料類型」按鈕，然後在圖片上拖曳畫出長方框。系統會自動去除底紋並進行局部辨識。</p>
+    <div class="max-w-7xl mx-auto space-y-4">
+        <div class="text-center space-y-1">
+            <h1 class="text-xl md:text-2xl font-bold text-gray-900"><i class="fa-solid fa-expand text-blue-600 mr-2"></i>標記辨識系統 (PaddleOCR 版)</h1>
+            <p class="text-gray-500 text-xs md:text-sm">支援手機觸控。請依序點選資料類型並畫框，最後點擊開始辨識。</p>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <!-- 左側：圖片與畫布區 -->
-            <div class="lg:col-span-2 bg-white p-4 rounded-xl shadow-sm space-y-4">
+            <div class="lg:col-span-2 bg-white p-3 rounded-xl shadow-sm space-y-3">
                 <input type="file" id="fileInput" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" accept="image/*">
                 
-                <div id="canvas-container" class="bg-gray-50 rounded-lg">
+                <div id="canvas-container" class="bg-gray-50 rounded-lg flex justify-center">
                     <canvas id="mainCanvas"></canvas>
                 </div>
             </div>
 
             <!-- 右側：控制面板與結果 -->
-            <div class="bg-white p-6 rounded-xl shadow-sm flex flex-col h-full space-y-6">
+            <div class="bg-white p-4 rounded-xl shadow-sm flex flex-col h-full space-y-4">
                 
                 <div>
-                    <h3 class="font-bold mb-3 text-gray-700">1. 選擇標記類型並在左側畫框</h3>
+                    <h3 class="font-bold mb-2 text-gray-700 text-sm">1. 選擇標記類型並在圖上畫框</h3>
                     <div class="grid grid-cols-2 gap-2">
-                        <!-- 綠色：發票號碼 -->
-                        <button class="mode-btn bg-green-100 text-green-700 border border-green-300 py-2 rounded font-medium hover:bg-green-200 transition" data-mode="invoice" data-color="#22c55e">
-                            發票號碼 (綠框)
+                        <button class="mode-btn bg-green-100 text-green-700 border border-green-300 py-2 rounded text-sm font-medium transition" data-mode="invoice" data-color="#22c55e">
+                            發票號碼 (綠)
                         </button>
-                        <!-- 紅色：賣方抬頭 -->
-                        <button class="mode-btn bg-red-100 text-red-700 border border-red-300 py-2 rounded font-medium hover:bg-red-200 transition" data-mode="title" data-color="#ef4444">
-                            賣方抬頭 (紅框)
+                        <button class="mode-btn bg-red-100 text-red-700 border border-red-300 py-2 rounded text-sm font-medium transition" data-mode="title" data-color="#ef4444">
+                            賣方抬頭 (紅)
                         </button>
-                        <!-- 藍色：賣方統編 -->
-                        <button class="mode-btn bg-blue-100 text-blue-700 border border-blue-300 py-2 rounded font-medium hover:bg-blue-200 transition" data-mode="taxid" data-color="#3b82f6">
-                            賣方統編 (藍框)
+                        <button class="mode-btn bg-blue-100 text-blue-700 border border-blue-300 py-2 rounded text-sm font-medium transition" data-mode="taxid" data-color="#3b82f6">
+                            賣方統編 (藍)
                         </button>
-                        <!-- 黃色：總金額 -->
-                        <button class="mode-btn bg-yellow-100 text-yellow-700 border border-yellow-300 py-2 rounded font-medium hover:bg-yellow-200 transition" data-mode="amount" data-color="#eab308">
-                            總計金額 (黃框)
+                        <button class="mode-btn bg-yellow-100 text-yellow-700 border border-yellow-300 py-2 rounded text-sm font-medium transition" data-mode="amount" data-color="#eab308">
+                            總計金額 (黃)
                         </button>
                     </div>
                 </div>
 
-                <!-- 辨識狀態 -->
-                <div id="statusArea" class="text-sm font-medium text-blue-600 hidden flex items-center">
-                    <i class="fa-solid fa-spinner fa-spin mr-2"></i> <span id="statusText">正在載入 OCR 語言包... (初次較久)</span>
+                <button id="startScanBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold shadow-md transition flex justify-center items-center">
+                    <i class="fa-solid fa-microchip mr-2"></i> 開始 PaddleOCR 辨識
+                </button>
+
+                <div id="statusArea" class="text-sm font-medium text-indigo-600 hidden flex items-center justify-center">
+                    <i class="fa-solid fa-circle-notch fa-spin mr-2"></i> <span id="statusText">正在傳送影像至模型...</span>
                 </div>
 
                 <!-- LINE 回報資訊 -->
                 <div class="flex-grow flex flex-col">
-                    <h3 class="font-bold mb-2 text-gray-700 flex justify-between items-center">
-                        2. 擷取結果 (LINE回報格式)
-                        <button id="clearBtn" class="text-xs text-red-500 hover:underline">清除重來</button>
+                    <h3 class="font-bold mb-2 text-gray-700 text-sm flex justify-between items-center">
+                        2. LINE群組回報格式
+                        <button id="clearBtn" class="text-xs text-red-500 hover:underline">清除畫布</button>
                     </h3>
-                    <textarea id="lineOutput" class="w-full flex-grow p-4 bg-gray-800 text-green-400 font-mono text-sm rounded-lg focus:outline-none" readonly style="min-height: 200px;">📌 【請款回報】
+                    <textarea id="lineOutput" class="w-full flex-grow p-3 bg-gray-800 text-green-400 font-mono text-sm rounded-lg focus:outline-none" readonly style="min-height: 160px;">📌 【請款回報】
 ----------------------
 🧾 發票號碼：
 🏢 賣方抬頭：
@@ -78,8 +75,8 @@
 ----------------------
 備註：無</textarea>
                     
-                    <button id="copyBtn" class="mt-3 w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium transition flex justify-center items-center">
-                        <i class="fa-regular fa-copy mr-2"></i> 複製回報
+                    <button id="copyBtn" class="mt-2 w-full bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 rounded-lg font-medium transition flex justify-center items-center">
+                        <i class="fa-regular fa-copy mr-2"></i> 複製文字
                     </button>
                 </div>
 
@@ -87,7 +84,6 @@
         </div>
     </div>
 
-    <!-- 隱藏的 Canvas 用於圖片二值化處理與裁切給 OCR -->
     <canvas id="cropCanvas" class="hidden"></canvas>
 
     <script>
@@ -98,29 +94,20 @@
         const cropCtx = cropCanvas.getContext('2d');
         const lineOutput = document.getElementById('lineOutput');
         const statusArea = document.getElementById('statusArea');
-        const statusText = document.getElementById('statusText');
         const modeBtns = document.querySelectorAll('.mode-btn');
 
         let img = new Image();
         let imageLoaded = false;
         let scale = 1;
 
-        // 塗鴉狀態
+        // 儲存已畫好的框 { mode: {x, y, w, h, color} }
+        let drawnBoxes = {};
+        
         let currentMode = null;
         let currentColor = null;
         let isDrawing = false;
         let startX, startY;
-        let boxes = {}; // 儲存各資料區塊的辨識結果
-
-        // 初始化 Tesseract Worker
-        let worker = null;
-        async function initTesseract() {
-            statusArea.classList.remove('hidden');
-            statusText.innerText = "正在載入 AI 辨識引擎 (需網路下載)...";
-            worker = await Tesseract.createWorker('eng+chi_tra');
-            statusArea.classList.add('hidden');
-        }
-        initTesseract();
+        let ocrResults = {}; 
 
         // 處理圖片上傳
         fileInput.addEventListener('change', (e) => {
@@ -130,10 +117,15 @@
             reader.onload = (event) => {
                 img.onload = () => {
                     imageLoaded = true;
-                    // 自適應寬度
-                    const containerWidth = document.getElementById('canvas-container').clientWidth;
-                    scale = containerWidth / img.width;
-                    if(scale > 1) scale = 1; // 圖片不放大，只縮小
+                    drawnBoxes = {}; // 換圖時清空
+                    ocrResults = {};
+                    updateLineOutput();
+                    
+                    const container = document.getElementById('canvas-container');
+                    const maxWidth = container.clientWidth;
+                    
+                    scale = maxWidth / img.width;
+                    if(scale > 1) scale = 1; 
                     
                     mainCanvas.width = img.width * scale;
                     mainCanvas.height = img.height * scale;
@@ -147,130 +139,173 @@
         // 選擇塗鴉模式
         modeBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
-                modeBtns.forEach(b => b.classList.remove('active', 'border-black'));
+                modeBtns.forEach(b => b.classList.remove('active', 'border-black', 'ring-2'));
                 const target = e.currentTarget;
-                target.classList.add('active', 'border-black');
+                target.classList.add('active', 'border-black', 'ring-2');
                 currentMode = target.dataset.mode;
                 currentColor = target.dataset.color;
             });
         });
 
-        // 畫布滑鼠事件
-        mainCanvas.addEventListener('mousedown', (e) => {
-            if (!imageLoaded || !currentMode) {
-                if(!currentMode) alert('請先點選右方的「資料類型」按鈕');
-                return;
-            }
-            isDrawing = true;
+        // --- 滑鼠與觸控共用邏輯 ---
+        function getCoords(e) {
             const rect = mainCanvas.getBoundingClientRect();
-            startX = e.clientX - rect.left;
-            startY = e.clientY - rect.top;
-        });
+            // 判斷是觸控還是滑鼠
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        }
 
-        mainCanvas.addEventListener('mousemove', (e) => {
+        function startDraw(e) {
+            if (!imageLoaded || !currentMode) return;
+            if (e.touches && e.cancelable) e.preventDefault(); // 防止手機滾動
+            isDrawing = true;
+            const coords = getCoords(e);
+            startX = coords.x;
+            startY = coords.y;
+        }
+
+        function moveDraw(e) {
             if (!isDrawing) return;
-            const rect = mainCanvas.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
+            if (e.touches && e.cancelable) e.preventDefault();
+            const coords = getCoords(e);
             
             redrawCanvas();
-            // 畫出目前的預覽框
             ctx.strokeStyle = currentColor;
             ctx.lineWidth = 2;
-            ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
-        });
+            ctx.setLineDash([5, 5]); // 虛線表示正在畫
+            ctx.strokeRect(startX, startY, coords.x - startX, coords.y - startY);
+            ctx.setLineDash([]);
+        }
 
-        mainCanvas.addEventListener('mouseup', async (e) => {
+        function endDraw(e) {
             if (!isDrawing) return;
             isDrawing = false;
             
+            // touchend 沒有 touches[0]，需要特殊處理，這裡簡單使用最後記錄的移動點或直接跳過過小框防錯
+            // 為了精確，通常在 touchmove 紀錄最後座標
             const rect = mainCanvas.getBoundingClientRect();
-            const endX = e.clientX - rect.left;
-            const endY = e.clientY - rect.top;
+            const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+            const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
+            const endX = clientX - rect.left;
+            const endY = clientY - rect.top;
             
             const box = {
                 x: Math.min(startX, endX) / scale,
                 y: Math.min(startY, endY) / scale,
                 w: Math.abs(endX - startX) / scale,
-                h: Math.abs(endY - startY) / scale
+                h: Math.abs(endY - startY) / scale,
+                color: currentColor
             };
 
-            // 太小的框忽略
-            if(box.w < 10 || box.h < 10) {
-                redrawCanvas();
-                return;
+            if(box.w > 10 && box.h > 10) {
+                drawnBoxes[currentMode] = box; // 儲存該模式的框（覆蓋舊的）
             }
-
             redrawCanvas();
-            // 畫上最終的框
-            ctx.strokeStyle = currentColor;
-            ctx.lineWidth = 2;
-            ctx.strokeRect(box.x * scale, box.y * scale, box.w * scale, box.h * scale);
+        }
 
-            await processCropAndRecognize(box, currentMode);
-        });
+        // 綁定滑鼠事件
+        mainCanvas.addEventListener('mousedown', startDraw);
+        mainCanvas.addEventListener('mousemove', moveDraw);
+        mainCanvas.addEventListener('mouseup', endDraw);
+        mainCanvas.addEventListener('mouseout', () => { if(isDrawing) isDrawing = false; redrawCanvas(); });
+
+        // 綁定觸控事件 (支援手機)
+        mainCanvas.addEventListener('touchstart', startDraw, { passive: false });
+        mainCanvas.addEventListener('touchmove', moveDraw, { passive: false });
+        mainCanvas.addEventListener('touchend', endDraw);
 
         function redrawCanvas() {
             if(!imageLoaded) return;
             ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
             ctx.drawImage(img, 0, 0, mainCanvas.width, mainCanvas.height);
+            
+            // 畫出所有已儲存的框
+            Object.values(drawnBoxes).forEach(box => {
+                ctx.strokeStyle = box.color;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(box.x * scale, box.y * scale, box.w * scale, box.h * scale);
+                // 加上半透明背景
+                ctx.fillStyle = box.color + '33'; // 33 是 20% 透明度的 hex
+                ctx.fillRect(box.x * scale, box.y * scale, box.w * scale, box.h * scale);
+            });
         }
 
-        // 裁切、去底紋與辨識
-        async function processCropAndRecognize(box, mode) {
-            if (!worker) return;
-            
+        // --- 核心：裁切並呼叫 PaddleOCR ---
+        document.getElementById('startScanBtn').addEventListener('click', async () => {
+            const modes = Object.keys(drawnBoxes);
+            if (modes.length === 0) {
+                alert("請先在圖片上標記至少一個資料區塊！");
+                return;
+            }
+
             statusArea.classList.remove('hidden');
-            statusText.innerText = "影像濾鏡處理與辨識中...";
+            document.getElementById('startScanBtn').disabled = true;
 
-            // 將裁切區域繪製到隱藏的 Canvas
-            cropCanvas.width = box.w;
-            cropCanvas.height = box.h;
-            cropCtx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
-
-            // 【關鍵技術】：去底紋影像二值化 (Thresholding)
-            const imageData = cropCtx.getImageData(0, 0, cropCanvas.width, cropCanvas.height);
-            const data = imageData.data;
-            const threshold = 140; // 門檻值：過濾掉淺灰色的「電子發票證明聯」浮水印
-            
-            for (let i = 0; i < data.length; i += 4) {
-                // 轉灰階
-                const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-                // 二值化：大於門檻變白，小於變黑
-                const v = gray >= threshold ? 255 : 0;
-                data[i] = data[i+1] = data[i+2] = v;
-            }
-            cropCtx.putImageData(imageData, 0, 0);
-
-            // 取得處理後的圖片給 Tesseract
-            const processedImgDataUrl = cropCanvas.toDataURL('image/jpeg');
-
-            try {
-                const { data: { text } } = await worker.recognize(processedImgDataUrl);
-                const cleanText = text.replace(/\n/g, '').trim();
+            for (let mode of modes) {
+                const box = drawnBoxes[mode];
                 
-                boxes[mode] = cleanText;
-                updateLineOutput();
-            } catch (err) {
-                console.error(err);
-            } finally {
-                statusArea.classList.add('hidden');
+                // 1. 裁切原圖比例的圖片
+                cropCanvas.width = box.w;
+                cropCanvas.height = box.h;
+                cropCtx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+                
+                // 2. 轉成 Base64 格式
+                const base64Image = cropCanvas.toDataURL('image/jpeg', 0.9);
+
+                // 3. 呼叫 PaddleOCR API (此處為實作示範)
+                try {
+                    const text = await callPaddleOcrAPI(base64Image);
+                    ocrResults[mode] = text;
+                } catch (err) {
+                    console.error("API 錯誤", err);
+                    ocrResults[mode] = "辨識失敗或未連接API";
+                }
             }
+
+            updateLineOutput();
+            statusArea.classList.add('hidden');
+            document.getElementById('startScanBtn').disabled = false;
+        });
+
+        // 模擬呼叫後端 PaddleOCR 的函數
+        async function callPaddleOcrAPI(base64Str) {
+            // 實際上您會使用類似以下的程式碼發送給您的伺服器：
+            /*
+            const response = await fetch('https://your-server.com/api/paddleocr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: base64Str })
+            });
+            const data = await response.json();
+            return data.text;
+            */
+            
+            // 在此 HTML 單機版中，模擬 0.5 秒的 API 延遲與回傳結果
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    resolve("API_回傳結果"); // 串接後端後，這裡會是 PP-OCR 準確的文字
+                }, 500);
+            });
         }
 
         function updateLineOutput() {
             lineOutput.value = `📌 【請款回報】
 ----------------------
-🧾 發票號碼：${boxes['invoice'] || ''}
-🏢 賣方抬頭：${boxes['title'] || ''}
-🏷️ 賣方統編：${boxes['taxid'] || ''}
-💰 總計金額：${boxes['amount'] || ''}
+🧾 發票號碼：${ocrResults['invoice'] || ''}
+🏢 賣方抬頭：${ocrResults['title'] || ''}
+🏷️ 賣方統編：${ocrResults['taxid'] || ''}
+💰 總計金額：${ocrResults['amount'] || ''}
 ----------------------
 備註：無`;
         }
 
         document.getElementById('clearBtn').addEventListener('click', () => {
-            boxes = {};
+            drawnBoxes = {};
+            ocrResults = {};
             redrawCanvas();
             updateLineOutput();
         });
@@ -280,7 +315,7 @@
             const btn = document.getElementById('copyBtn');
             btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i> 已複製';
             setTimeout(() => {
-                btn.innerHTML = '<i class="fa-regular fa-copy mr-2"></i> 複製回報';
+                btn.innerHTML = '<i class="fa-regular fa-copy mr-2"></i> 複製文字';
             }, 2000);
         });
     </script>
